@@ -5,6 +5,11 @@ from keras.layers.wrappers import TimeDistributed
 import keras.backend as K
 import numpy as np
 import tensorflow as tf
+from keras import callbacks
+from keras.optimizers import SGD
+from hdf5 import HDF5DatasetGenerator
+from callback import *
+from config import *
 
 
 def ctc_lambda_func(args):
@@ -13,21 +18,35 @@ def ctc_lambda_func(args):
     return K.ctc_batch_cost(y_true, y_pred, input_length, label_length)
 
 
-def sliding_window_layer(inputs, character_width=32, character_step=8):
-    # inputs: batches*32*280*1
-
-    for b in range(inputs.shape[0]):
-        batch_input = inputs[b, :, :, :].reshape((1, inputs.shape[1], inputs.shape[2], inputs.shape[3]))
-        for w in range(0, batch_input.shape[2] - character_width, character_step):
-            if w == 0:
-                output_batch = batch_input[:, :, w:(w + 1) * character_width, :]
-            else:
-                output_batch = np.concatenate((output_batch, batch_input[:, :, w:w + character_width, :]), axis=0)
-
-        if b == 0:
-            output = output_batch
-        else:
-            output = np.concatenate((output, output_batch), axis=0)
+# def sliding_window_layer(inputs, window_width=32, slide_stride=4):
+#     # inputs: batches*32*280*1
+#     for b in range(inputs.shape[0]):
+#         batch_input = inputs[b, :, :, :].reshape((1, inputs.shape[1], inputs.shape[2], inputs.shape[3]))
+#         for w in range(0, batch_input.shape[2] - window_width, slide_stride):
+#             if w == 0:
+#                 output_batch = batch_input[:, :, w:(w + 1) * window_width, :]
+#             else:
+#                 output_batch = np.concatenate((output_batch, batch_input[:, :, w:w + window_width, :]), axis=0)
+#
+#         if b == 0:
+#             output = output_batch
+#         else:
+#             output = np.concatenate((output, output_batch), axis=0)
+#     return output
+def sliding_window_layer(inputs, window_width=32, slide_stride=4):
+    # inputs: (batch_size,32,280,1)
+    batch_size, height, width = inputs.shape[:3]
+    num_steps = (width - window_width) // slide_stride
+    windows = []
+    for step_idx in range(num_steps):
+        start = slide_stride * step_idx
+        end = start + window_width
+        window = inputs[:, :, start:end, :]
+        # window = K.expand_dims(window, axis=1)
+        windows.append(window)
+    output = K.stack(windows, axis=1)
+    # get_shape() 返回的是 TensorShape 对象
+    # swl_output_shape = output.get_shape().as_list()
     return output
 
 
@@ -96,4 +115,46 @@ def kale(input_shape=(32, None, 1), num_classes=5991, max_string_len=10):
     return model
 
 
-k = kale()
+model = kale()
+# clipnorm seems to speeds up convergence
+sgd = SGD(lr=0.1, momentum=0.9, nesterov=True, clipnorm=5)
+model.compile(loss={'ctc': lambda y_true, y_pred: y_pred}, optimizer=sgd)
+# model = models.load_model('models/synthetic_model_0829_3000000_1.3227_1.0404.hdf5',
+#                   custom_objects={'<lambda>': lambda y_true, y_pred: y_pred})
+gen = HDF5DatasetGenerator(TRAIN_DB_PATH, batch_size=100).generator
+val_gen = HDF5DatasetGenerator(VALIDATION_DB_PATH, batch_size=100).generator
+
+# callbacks
+training_monitor = TrainingMonitor(figure_path='synthetic_0829_3000000.jpg', json_path='synthetic_0829_3000000.json',
+                                   start_at=5)
+accuracy_evaluator = AccuracyEvaluator(TEST_DB_PATH, batch_size=100)
+learning_rate_updator = LearningRateUpdator(init_lr=0.1)
+callbacks = [
+    # Interrupts training when improvement stops
+    callbacks.EarlyStopping(
+        # Monitors the model’s validation accuracy
+        monitor='val_loss',
+        # Interrupts training when accuracy has stopped
+        # improving for more than one epoch (that is, two epochs)
+        patience=10,
+    ),
+    # Saves the current weights after every epoch
+    callbacks.ModelCheckpoint(
+        # Path to the destination model file
+        filepath='models/synthetic_model_0829_3000000.hdf5',
+        # These two arguments mean you won’t overwrite the
+        # model file unless val_loss has improved, which allows
+        # you to keep the best model seen during training.
+        monitor='val_loss',
+        save_best_only=True,
+        verbose=1
+    ),
+    training_monitor,
+    # accuracy_evaluator
+    learning_rate_updator
+]
+model.fit_generator(gen(), steps_per_epoch=3000000 // 100,
+                    callbacks=callbacks,
+                    epochs=100,
+                    validation_data=val_gen(),
+                    validation_steps=279600 // 100)
