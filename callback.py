@@ -101,6 +101,9 @@ class LearningRateUpdator(Callback):
         K.set_value(self.model.optimizer.lr, self.init_lr)
         print('new_init_lr={}'.format(K.get_value(self.model.optimizer.lr)))
 
+    # def on_batch_end(self, batch, logs=None):
+    #     self.model.save('model.hdf5')
+
     def on_epoch_end(self, epoch, logs=None):
         model = self.model
         old_lr = K.get_value(model.optimizer.lr)

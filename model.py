@@ -34,17 +34,23 @@ def ctc_lambda_func(args):
 #             output = np.concatenate((output, output_batch), axis=0)
 #     return output
 def sliding_window_layer(inputs, window_width=32, slide_stride=4):
+    """
+    :param inputs: np.ndarray
+    :param window_width: 滑动窗口的宽度,高度一定为 32
+    :param slide_stride: 滑动步长
+    :return:
+    """
     # inputs: (batch_size,32,280,1)
     batch_size, height, width = inputs.shape[:3]
     num_steps = (width - window_width) // slide_stride
     windows = []
-    for step_idx in range(num_steps):
-        start = slide_stride * step_idx
+    for step_idx in range(num_steps + 1):
+        start = step_idx * slide_stride
         end = start + window_width
         window = inputs[:, :, start:end, :]
         # window = K.expand_dims(window, axis=1)
         windows.append(window)
-    output = K.stack(windows, axis=1)
+    output = np.stack(windows, axis=1)
     # get_shape() 返回的是 TensorShape 对象
     # swl_output_shape = output.get_shape().as_list()
     return output
@@ -105,7 +111,7 @@ def kale(input_shape=(32, None, 1), num_classes=5991, max_string_len=10):
     # classifier = models.Model(inputs=input, outputs=classifier_output)
     # classifier.summary()
     label = layers.Input(name='label', shape=[max_string_len], dtype='int64')
-    # 序列的长度,此模型中为
+    # 序列的长度,此模型中为 (280 - 32) // 4 = 63
     seq_length = layers.Input(name='seq_length', shape=[1], dtype='int64')
     label_length = layers.Input(name='label_length', shape=[1], dtype='int64')
     ctc_output = layers.Lambda(ctc_lambda_func, output_shape=(1,),
@@ -121,8 +127,8 @@ sgd = SGD(lr=0.1, momentum=0.9, nesterov=True, clipnorm=5)
 model.compile(loss={'ctc': lambda y_true, y_pred: y_pred}, optimizer=sgd)
 # model = models.load_model('models/synthetic_model_0829_3000000_1.3227_1.0404.hdf5',
 #                   custom_objects={'<lambda>': lambda y_true, y_pred: y_pred})
-gen = HDF5DatasetGenerator(TRAIN_DB_PATH, batch_size=100).generator
-val_gen = HDF5DatasetGenerator(VALIDATION_DB_PATH, batch_size=100).generator
+gen = HDF5DatasetGenerator(TRAIN_DB_PATH, batch_size=30).generator
+val_gen = HDF5DatasetGenerator(VALIDATION_DB_PATH, batch_size=10).generator
 
 # callbacks
 training_monitor = TrainingMonitor(figure_path='synthetic_0829_3000000.jpg', json_path='synthetic_0829_3000000.json',
@@ -153,8 +159,8 @@ callbacks = [
     # accuracy_evaluator
     learning_rate_updator
 ]
-model.fit_generator(gen(), steps_per_epoch=3000000 // 100,
+model.fit_generator(gen(), steps_per_epoch=3000000 // 30,
                     callbacks=callbacks,
                     epochs=100,
                     validation_data=val_gen(),
-                    validation_steps=279600 // 100)
+                    validation_steps=279600 // 10)

@@ -78,8 +78,8 @@ class HDF5DatasetGenerator:
                 # extract the images and labels from the HDF dataset
                 images = self.db["data"][i:i + self.batch_size]
                 labels = self.db["labels"][i:i + self.batch_size]
-                # 69 是因为输出的序列长度为 69, 10 是因为字符串长度为 10
-                yield [images, labels, np.ones(self.batch_size) * (69), np.ones(self.batch_size) * 10], np.ones(self.batch_size)
+                # 63 是因为输出的序列长度为 63 = (280 - 32) // 4, 10 是因为字符串长度为 10
+                yield [images, labels, np.ones(self.batch_size) * 63, np.ones(self.batch_size) * 10], np.ones(self.batch_size)
 
     def close(self):
         # close the database
